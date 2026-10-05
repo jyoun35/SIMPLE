@@ -1,7 +1,9 @@
 import gmsh
 import numpy as np
 import matplotlib.pyplot as plt
+
 from collections import defaultdict
+from src.helpers import plot_mesh
 
 class Mesh:
     """
@@ -15,7 +17,8 @@ class Mesh:
         self._convert_indices()
         self._build_connectivity() 
         self._compute_geom_params()
-        if plot: self.plot()
+        self._determine_node_cells()
+        if plot: plot_mesh(self)
 
     def _read_mesh(self):
         """
@@ -24,9 +27,10 @@ class Mesh:
 
         # initialize Gmsh API to process mesh
         gmsh.initialize()
-        gmsh.open(self.filename)
+        gmsh.open(str(self.filename))
 
         # extract nodes of the mesh
+        gmsh.model.mesh.removeDuplicateNodes()
         node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
 
         self.node_tags = np.array(node_tags, dtype=int)
@@ -105,7 +109,8 @@ class Mesh:
 
         for (node_1, node_2), cells in edge_to_cells.items():
             if len(cells) == 2:
-                self.internal_faces.append((node_1, node_2, cells[0], cells[1]))
+                cell_1, cell_2 = sorted(cells)
+                self.internal_faces.append((node_1, node_2, cell_1, cell_2))
 
             elif len(cells) == 1:
                 boundary_name = edge_to_name.get((node_1, node_2))
@@ -114,6 +119,10 @@ class Mesh:
         # count the number of internal and boundary faces
         self.n_internal = len(self.internal_faces)
         self.n_boundary = len(self.boundary_faces)
+
+        for edge, cells in edge_to_cells.items():
+            if len(cells) > 2:
+                print("Non-manifold edge:", edge, cells)
 
     def _compute_geom_params(self):
         '''
@@ -202,52 +211,24 @@ class Mesh:
             self.face_normals[key] = np.array([nx, ny])
             self.face_lengths[key] = edge_length
 
-    def plot(self):
-        """
-        Plot the mesh
-        """
+    def _determine_node_cells(self):
+        '''
+        Determine the cells touching a node (needed for Green-Gauss node-based gradient)
+        '''
 
-        # initialize plot
-        fig, ax = plt.subplots(figsize=(8,6))
+        # Initialize an empty list for every node
+        self.node_cells = {node_idx: [] for node_idx in range(len(self.node_coords))}
 
-        # plot the nodes of each of the quad cells
-        for cell in self.cells:
-            pts = self.node_coords[cell]
-            pts = np.vstack([pts, pts[0]])
-            ax.plot(pts[:,0], pts[:,1], 'k-', linewidth=0.5)
+        # Loop through every cell
+        for cell_idx, cell in enumerate(self.cells):
 
-        # plot and label the boundary faces
-        if self.boundary_faces:
-
-            # extract boundary name
-            boundary_name = list(set(boundary_face[3] for boundary_face in self.boundary_faces))
-
-            # assign colors to boundaries
-            color_cycle = ['red','blue','green','orange','purple','cyan','magenta']
-            colour_map = {name: color_cycle[i % len(color_cycle)] for i, name in enumerate(boundary_name)}
-
-            # plot each boundary face
-            for face in self.boundary_faces:
-                node_1, node_2, _, name = face
-                pts = self.node_coords[[node_1, node_2]]
-                ax.plot(pts[:,0], pts[:,1], color=colour_map.get(name, 'black'), linewidth=2.5, label=name)
-
-            # remove duplicate legend labels
-            handles, labels = ax.get_legend_handles_labels()
-            unique_labels = dict(zip(labels, handles))
-
-            # show unique legend labels
-            if unique_labels: ax.legend(unique_labels.values(), unique_labels.keys())
-
-        # set up the plot
-        ax.set_aspect('equal')
-        ax.set_xlabel('x'); ax.set_ylabel('y')
-        ax.set_title(f'Mesh: {self.filename}')
-        plt.tight_layout()
-        plt.show()
+            # Add this cell to every node belonging to the cell
+            for node_idx in cell:
+                self.node_cells[node_idx].append(cell_idx)
+                
 
 if __name__ == "__main__":
-    mesh = Mesh("fine_CMesh_NACA_2412.msh", plot=True)
+    mesh = Mesh(".\\data\\meshes\\very_coarse_CMesh_NACA_2412.msh", plot=True)
     print(f"# of Quad Cells: {mesh.n_cells}")
     print(f"# of Internal Faces: {mesh.n_internal}")
     print(f"# of Boundary Faces: {mesh.n_boundary}")

@@ -3,9 +3,9 @@ $MeshFormat
 $EndMeshFormat
 $PhysicalNames
 3
-1 17 "inlet"
-1 18 "outlet"
-1 19 "slip wall"
+1 17 "velocity-inlet"
+1 18 "pressure-outlet"
+1 19 "slip-wall"
 $EndPhysicalNames
 $Entities
 87 16 5 0
