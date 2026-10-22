@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 
-from src.helpers import plot_soln
-
 import numpy as np
 
 
@@ -26,9 +24,6 @@ def initialize_soln(ICs, mesh, plot=False):
         v=v, 
         p=p
     )
-
-    # plot initial solution if specified
-    if plot: plot_soln(mesh, solution, title="Initial Solution")
 
     return solution
 
