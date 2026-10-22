@@ -25,6 +25,9 @@ def initialize_soln(ICs, mesh, plot=False):
         p=p
     )
 
+    # # plot initial solution if specified
+    # if plot: plot_soln(mesh, solution, title="Initial Solution")
+
     return solution
 
 
@@ -38,7 +41,7 @@ def load_soln(file, mesh, plot=False):
         p=data["p"],
     )
 
-    # plot loaded solution if specified
-    if plot: plot_soln(mesh, solution, title="Loaded Solution")
+    # # plot loaded solution if specified
+    # if plot: plot_soln(mesh, solution, title="Loaded Solution")
 
     return solution
