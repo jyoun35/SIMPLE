@@ -64,6 +64,7 @@ def process_boundaries(BCs):
     - velocity-inlet
     - pressure-outlet
     - slip-wall
+    - no-slip-wall
     """
     
     boundaries = {}
@@ -76,6 +77,8 @@ def process_boundaries(BCs):
             boundaries[name] = PressureOutlet(p=details["p"])
         elif name == "slip-wall":
             boundaries[name] = SlipWall()
+        elif name == "no-slip-wall":
+            boundaries[name] = NoSlipWall()
         else:
             raise ValueError(f"Unknown or unimplemented boundary condition: {name}")
 
@@ -86,3 +89,4 @@ def process_boundaries(BCs):
 from .VelocityInlet import VelocityInlet   
 from .PressureOutlet import PressureOutlet
 from .SlipWall import SlipWall         
+from .NoSlipWall import NoSlipWall

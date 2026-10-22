@@ -57,263 +57,186 @@ def plot_mesh(mesh):
     plt.show()
 
 
-def plot_soln(mesh, solution, title="Solution"):
-    """
-    Plot each field in the solution dataclass as a filled contour.
-    """
+def plot_blasius(mesh, soln, x_eval, y_eval, U_infty, nu, blasius_file, y_wall=0.0, save_path=None):
+    '''
+    Plot Blasius vs numerical solution from solver for BL profile and Cf.
 
-    quads = [mesh.node_coords[cell] for cell in mesh.cells]
+    Note: 
+    * y-axis limits is explicitly set
+    '''
 
-    for field in fields(solution):
+    # load blasius table file
+    blasius_table  = np.loadtxt(blasius_file, delimiter=",", skiprows=1)
+    eta_blasius    = blasius_table[:, 0]
+    fprime_blasius = blasius_table[:, 2]
 
-        name   = field.name
-        values = getattr(solution, name)
+    # extract cell centroids
+    x_c = mesh.cell_centroids[:, 0]
+    y_c = mesh.cell_centroids[:, 1]
 
-        fig, ax = plt.subplots(figsize=(7, 5))
-
-        collection = PolyCollection(
-            quads, array=values,
-            cmap="coolwarm", edgecolors="k", linewidths=0.2,
-        )
-        collection.set_clim(np.min(values), np.max(values))
-
-        ax.add_collection(collection)
-        ax.autoscale()
-        ax.set_title(f"{title} - {name}")
-        ax.set_aspect("equal")
-        fig.colorbar(collection, ax=ax)
-
-    plt.show()
+    # initialize plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
 
 
-def plot_continuity_residual(mesh, residual):
-    """
-    Plot the cell-centered continuity residual by cell.
-    """
+    # ---------- subplot 1: f' vs eta ---------- #    
 
-    quads = [mesh.node_coords[cell] for cell in mesh.cells]
+    # x cell centroid to evaluate
+    x_c_eval = x_c[np.argmin(np.abs(x_c - x_eval))]
 
-    fig, ax = plt.subplots(figsize=(7, 5))
+    # find y values at x_c_eval
+    mask = (np.abs(x_c - x_c_eval) < 1e-12) & (y_c <= y_eval) & (y_c >= y_wall)
+    col_idx = np.where(mask)[0]
+    col_idx = col_idx[np.argsort(y_c[col_idx])]
+    y_profile = y_c[col_idx] - y_wall
 
-    collection = PolyCollection(
-        quads, array=residual,
-        cmap="RdBu_r", edgecolors="k", linewidths=0.2,
-    )
-    collection.set_clim(np.min(residual), np.max(residual))
+    # get η and f' from solution
+    eta_soln    = y_profile * np.sqrt(U_infty / (nu * x_c_eval))
+    fprime_soln = soln.u[col_idx] / U_infty
 
-    ax.add_collection(collection)
-    ax.autoscale()
-    ax.set_title("Continuity Residual by Cell")
-    ax.set_aspect("equal")
+    # plot η and f' from Blasius and from solution
+    ax1.plot(fprime_blasius, eta_blasius, "k-", lw=2, label="Blasius")
+    ax1.plot(fprime_soln, eta_soln, "o", color="tab:red", ms=4, label=f"Solution @ x = {x_c_eval:.4g} m")
 
-    cbar = fig.colorbar(collection, ax=ax)
-    cbar.set_label(r"$R_P = \sum_f \rho \mathbf{u}_f \cdot \mathbf{S}_f$")
-
-    plt.show()
-
-
-# ============================================================ #
-#                           XFOIL                              #
-# ============================================================ #
-
-def read_XFOIL_data(xfoil_file):
-    """
-    Read an XFOIL polar/CP file then return dictionary {'x':..., 'Cp':...}.
-    """
-
-    data = np.loadtxt(xfoil_file, comments="#", skiprows=2)
-
-    x  = data[:, 0]
-    Cp = data[:, 2]
-
-    return {"x": x, "Cp": Cp}
+    ax1.set_xlabel(r"$f' = u/U_\infty$", fontsize=12)
+    ax1.set_ylabel(r"$\eta = y\,\sqrt{U_\infty/(\nu x)}$", fontsize=12)
+    ax1.set_title("Boundary-Layer Profile", fontsize=16)
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc="best", fontsize=14)
 
 
-def plot_pressure_distribution(mesh, p, raw_BCs, xfoil_data, c=1.0):
-    """
-    Plot the pressure-coefficient distribution around the airfoil and overlay XFOIL data.
-    """
+    # ---------- subplot 2: Cf vs x ---------- #
 
-    # freestream conditions from "raw" (i.e. dictionary) BCs
-    rho   = 1.0 # fixed for now...
-    p_inf = raw_BCs["pressure-outlet"]["p"]
-    u_inf = raw_BCs["velocity-inlet"]["u"]
-    v_inf = raw_BCs["velocity-inlet"]["v"]
-    V_inf = np.sqrt(u_inf**2 + v_inf**2)
-    q_inf = 0.5 * rho * V_inf**2
+    # y cell centroid to evaluate
+    y_c_eval = y_c[np.argmin(np.abs(y_c - y_wall))]
 
-    # collect data from the surface (i.e. slip-wall) of the airfoil
-    airfoil_faces = [f for f in mesh.boundary_faces if f[3] == "slip-wall"]
+    # find x values at x_c_eval
+    mask = (np.abs(y_c - y_c_eval) < 1e-12) & (x_c > 0.0) & (x_c < 0.025)
+    col_idx  = np.where(mask)[0]
+    col_idx  = col_idx[np.argsort(x_c[col_idx])]
+    x_profile = x_c[col_idx]
 
-    x_surface = []
-    y_surface = []
-    p_surface = []
+    # compute ∂u/∂y at the wall
+    y1 = y_c[col_idx] - y_wall
+    u1 = soln.u[col_idx]
+    dudy_wall = (u1 - 0) / y1
 
-    for node_1, node_2, cell, _ in airfoil_faces:
-        fc = (mesh.node_coords[node_1] + mesh.node_coords[node_2]) / 2
-        x_surface.append(fc[0])
-        y_surface.append(fc[1])
-        p_surface.append(p[cell])
+    # compute skin friciton coefficient (Cf) from solution and from Blasius
+    Cf_soln = 2.0 * nu * dudy_wall / U_infty**2
+    Cf_blasius = 0.664 * np.sqrt(nu / (U_infty * x_profile))
 
-    x_surface = np.asarray(x_surface)
-    y_surface = np.asarray(y_surface)
-    p_surface = np.asarray(p_surface)
+    # plot Cf from Blasius and from solution
+    ax2.plot(x_profile, Cf_blasius, "k-", lw=2, label=r"Blasius  $0.664/\sqrt{Re_x}$")
+    ax2.plot(x_profile, Cf_soln, "o", color="tab:red", ms=4, label="Solution")
 
-    # compute the pressure coefficient and normalized position
-    Cp      = (p_surface - p_inf) / q_inf
-    x_over_c = x_surface / c
+    ax2.set_xlabel("x [m]", fontsize=12)
+    ax2.set_ylabel(r"$C_f$", fontsize=12)
+    ax2.set_title("Skin-Friction Coefficient", fontsize=16)
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(loc="best", fontsize=14)
 
-    # split the upper/lower surface
-    upper = y_surface > 0
-    lower = y_surface < 0
+    ax2.set_ylim([0, 0.05]) # explicitly set for visualization purposes
 
-    upper_ordered = np.argsort(x_over_c[upper])
-    lower_ordered = np.argsort(x_over_c[lower])
+    plt.tight_layout()
 
-    # plot the upper, lower, and XFOIL data
-    fig, ax = plt.subplots(figsize=(5.5, 6.5))
-
-    ax.plot(x_over_c[upper][upper_ordered], Cp[upper][upper_ordered], "-o", markersize=3, label="Upper")
-    ax.plot(x_over_c[lower][lower_ordered], Cp[lower][lower_ordered], "-o", markersize=3, label="Lower")
-    ax.plot(xfoil_data["x"], xfoil_data["Cp"], "--", markersize=3, label="XFOIL Data")
-
-    ax.invert_yaxis()
-    ax.set_xlabel(r"$x/c$")
-    ax.set_ylabel(r"$C_p$")
-    ax.set_title("Airfoil Pressure Coefficient Distribution")
-    ax.grid(True)
-    ax.legend()
-
-    return fig
+    # save figure if specified
+    if save_path is not None:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+    else:
+        plt.show()
 
 
 # ============================================================ #
 #                         CHECKPOINTS                          #
 # ============================================================ #
 
-def save_checkpoint(SAVE_DIR, iter, mesh, soln, residual, residual_hist, raw_BCs, xfoil_data):
+def save_checkpoint(SAVE_DIR, iter, mesh, soln, residual_hist, raw_BCs,
+                    blasius_file, x_eval, y_eval, nu, y_wall=0.0):
     """
-    Save .npz + solution contour + Cp plot for the current iteration.
+    Save:
+    * solution file (.npz)
+    * velocity-magnitude contour (.png)
+    * continuity-residual history (.png + .csv)
+    * Blasius comparison plot (.png)
+
+    Note: 
+    * x- and y-axis limits are explicitly set
     """
 
     os.makedirs(SAVE_DIR, exist_ok=True)
 
-    # save current solution as .npz
+    # save solution as .npz
     np.savez(
         os.path.join(SAVE_DIR, f"solution_iter_{iter:06d}.npz"),
         u=soln.u, v=soln.v, p=soln.p,
     )
 
-    # save results 
-
-    # compute quantities to plot (velocity magnitude + gauge pressure)
-    V_mag  = np.sqrt(soln.u**2 + soln.v**2)
-    p_diff = soln.p - raw_BCs["pressure-outlet"]["p"]
-
-    # set up the subplot
+    # plot velocity magnitude contour
+    V_mag = np.sqrt(soln.u**2 + soln.v**2)
     quads = [mesh.node_coords[cell] for cell in mesh.cells]
 
-    xlim = (-0.1, 1.1)
-    ylim = (-0.3, 0.3)
-    Vmin, Vmax = 0.0, 45.0
-    pmin, pmax = 500.0, -500.0
-    rmin, rmax = -0.0025, 0.0025
+    xlim = (0, 0.200) # explicitly set for visualization
+    ylim = (0, 0.002) # explicitly set for visualization 
 
-    fig_soln, axes = plt.subplots(2, 1, figsize=(9, 8))
+    Vmin, Vmax = 0.0, raw_BCs["velocity-inlet"]["u"]
 
-    # plot velocity magnitude contour
+    fig_v, ax_v = plt.subplots(figsize=(9, 4))
+
     c1 = PolyCollection(quads, array=V_mag, cmap="coolwarm", edgecolors="none")
     c1.set_clim(Vmin, Vmax)
 
-    axes[0].add_collection(c1)
-    axes[0].set_xlim(*xlim); axes[0].set_ylim(*ylim)
-    axes[0].set_aspect("equal")
-    axes[0].set_title(f"Velocity Magnitude - Iteration {iter}")
-    axes[0].set_xlabel("x"); axes[0].set_ylabel("y")
+    ax_v.add_collection(c1)
+    ax_v.set_xlim(*xlim); ax_v.set_ylim(*ylim)
+    ax_v.set_aspect("auto")
+    ax_v.set_title(f"Velocity Magnitude - Iteration {iter}")
+    ax_v.set_xlabel("x"); ax_v.set_ylabel("y")
 
-    fig_soln.colorbar(c1, ax=axes[0], label="Velocity Magnitude [m/s]")
+    fig_v.colorbar(c1, ax=ax_v, label="Velocity Magnitude [m/s]")
 
-    # plot pressure difference contour
-    c2 = PolyCollection(quads, array=p_diff, cmap="viridis", edgecolors="none")
-    c2.set_clim(pmin, pmax)
-
-    axes[1].add_collection(c2)
-    axes[1].set_xlim(*xlim); axes[1].set_ylim(*ylim)
-    axes[1].set_aspect("equal")
-    axes[1].set_title(f"Pressure Relative to Freestream - Iteration {iter}")
-    axes[1].set_xlabel("x"); axes[1].set_ylabel("y")
-
-    fig_soln.colorbar(c2, ax=axes[1], label=r"$p-p_\infty$ [Pa]")
-
-    # save velocity magnitude + pressure difference contour plot
+    # save velocity magnitude contour
     plt.tight_layout()
-    fig_soln.savefig(
-        os.path.join(SAVE_DIR, f"soln_contours_iter_{iter:06d}.png"),
-        dpi=300, bbox_inches="tight",
+    fig_v.savefig(
+        os.path.join(SAVE_DIR, f"velocity_magnitude_iter_{iter:06d}.png"), 
+        dpi=300, bbox_inches="tight"
     )
-    plt.close(fig_soln)
+    plt.close(fig_v)
 
-    # plot + save continuity residual field
-    fig_residual, ax_residual = plt.subplots(figsize=(7, 4))
-
-    c3 = PolyCollection(quads, array=residual, cmap="RdBu_r", edgecolors="black", linewidths=0.05)
-    c3.set_clim(rmin, rmax)
-
-    ax_residual.add_collection(c3)
-    ax_residual.set_aspect("equal")
-    ax_residual.set_title(f"Continuity Residual $\\mathbf{{WITH}}$ Rhie-Chow Interpolation \nIteration: {iter}")
-    ax_residual.set_xlabel("x")
-    ax_residual.set_ylabel("y")
-
-    fig_residual.colorbar(c3, ax=ax_residual, label=r"$R_P = \sum_f \rho \mathbf{u}_f \cdot \mathbf{S}_f$")
-
-    plt.tight_layout()
-    fig_residual.savefig(
-        os.path.join(SAVE_DIR, f"continuity_residual_iter_{iter:06d}.png"),
-        dpi=300, bbox_inches="tight",
-    )
-    plt.close(fig_residual)
-
-    # plot + save continuity residual history
+    # plot continuity residual history
     fig_hist, ax_hist = plt.subplots(figsize=(9, 4))
 
-    ax_hist.plot(
-        residual_hist[:, 0],
-        residual_hist[:, 2],
-    )
-
+    ax_hist.plot(residual_hist[:, 0], residual_hist[:, 2])
     ax_hist.set_yscale("log")
     ax_hist.set_xlabel("Iteration")
     ax_hist.set_ylabel("L1 Norm")
     ax_hist.set_title("L1 Norm of Continuity Residual")
     ax_hist.grid(True)
 
+    # save continuity residual history
     plt.tight_layout()
     fig_hist.savefig(
         os.path.join(SAVE_DIR, f"continuity_residual_history_iter_{iter:06d}.png"),
-        dpi=300,
-        bbox_inches="tight",
+        dpi=300, bbox_inches="tight",
     )
     plt.close(fig_hist)
 
-    # save continuity residual history to CSV
+    # save continuity history to CSV
     np.savetxt(
-        os.path.join(SAVE_DIR, f"continuity_residual_history.csv"),
+        os.path.join(SAVE_DIR, "continuity_residual_history.csv"),
         residual_hist,
         delimiter=",",
         header="Iteration, Max, L1_Norm, Net",
         comments="",
     )
 
-    # plot + save pressure coefficient plot
-    fig_Cp = plot_pressure_distribution(mesh, soln.p, raw_BCs, xfoil_data, c=1.0)
-    plt.tight_layout()
-    fig_Cp.savefig(
-        os.path.join(SAVE_DIR, f"Cp_plot_iter_{iter:06d}.png"),
-        dpi=300, bbox_inches="tight",
+    # Blasius comparison plot
+    U_infty = np.sqrt(
+        raw_BCs["velocity-inlet"]["u"]**2 + raw_BCs["velocity-inlet"]["v"]**2
     )
-    plt.close(fig_Cp)
-
+    plot_blasius(
+        mesh, soln, x_eval, y_eval, U_infty, nu, blasius_file,
+        y_wall=y_wall,
+        save_path=os.path.join(SAVE_DIR, f"blasius_iter_{iter:06d}.png"),
+    )
 
     print(f"Saved checkpoint at iteration {iter}\n")
 

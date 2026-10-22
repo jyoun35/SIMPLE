@@ -9,13 +9,12 @@ import numpy as np
 #                           INPUTS                             #
 # ============================================================ #
 
-MESH_FILE = "data\\meshes\\fine_CMesh_NACA_2412.msh"
-XFOIL_FILE = "data\\xfoil\\XFOIL_NACA_2412_AoA3.dat"
+MESH_FILE = "data\\meshes\\fine_flat_plate.msh"
 
-ITERS = 1000
-NON_ORTHO_CORRECTION_ITERS = 1
+ITERS = 2500
+NON_ORTHO_CORRECTION_ITERS = 0
 
-SAVE_DIR = "results\\final_test_2"
+SAVE_DIR = "results\\blasius_validation"
 SAVE_FREQ = 10
 
 PLOT_MESH = False
@@ -23,19 +22,21 @@ PLOT_ICS  = False
 
 BOUNDARY_CONDITIONS = {
     "velocity-inlet": {
-        "u": 34.3 * np.cos(np.deg2rad(3)),  # [m/s]
-        "v": 34.3 * np.sin(np.deg2rad(3))   # [m/s]
+        "u": 34.3 * np.cos(np.deg2rad(0)),  # [m/s]
+        "v": 34.3 * np.sin(np.deg2rad(0))   # [m/s]
     },
     "pressure-outlet": {
         "p": 101325.0                       # [Pa]
     },
     "slip-wall": {
+    },
+    "no-slip-wall":{
     }
 }
 
 INITIAL_CONDITIONS = {
-    "u": 34.3 * np.cos(np.deg2rad(3)),      # [m/s]
-    "v": 34.3 * np.sin(np.deg2rad(3)),       # [m/s]
+    "u": 34.3 * np.cos(np.deg2rad(0)),      # [m/s]
+    "v": 34.3 * np.sin(np.deg2rad(0)),      # [m/s]
     "p": 101325.0   # [Pa]
     # "rho": 1.225    # [kg/m^3] (CONSTANT rho = 1 is used for now...)
 }
@@ -56,9 +57,6 @@ URF = {
 #                            SETUP                             #
 # ============================================================ #
 
-# XFOIL reference data for the Cp plot
-xfoil_data = read_XFOIL_data(XFOIL_FILE)
-
 # mesh + geometric quantities
 mesh = Mesh(filename=MESH_FILE, plot=PLOT_MESH)
 
@@ -67,6 +65,9 @@ BCs = process_boundaries(BOUNDARY_CONDITIONS)
 
 # initial condition
 soln = initialize_soln(ICs=INITIAL_CONDITIONS, mesh=mesh, plot=PLOT_ICS)
+
+# soln_file = "\\results\\blasius_validation\\{SOLUTION_FILE}.npz"
+# soln = load_soln(soln_file, mesh, plot=PLOT_ICS)
 
 
 # ============================================================ #
@@ -123,7 +124,7 @@ for iter in range(ITERS):
     # [STEP 4] update the solution state
     soln = Solution(u=u_new, v=v_new, p=p_new)
 
-    # continuity residual for the new solution
+    # continuity residual for the updated solution
     residual, results = continuity_residual(
         mesh, 
         soln,
@@ -132,28 +133,31 @@ for iter in range(ITERS):
     )
     residual_hist = np.vstack((residual_hist, [iter, *results]))
 
-
-    # if (iter + 1) % 50 == 0:
-    #     plot_continuity_residual(mesh, residual)
-    #     plot_soln(mesh, soln)
-
     # save checkpoint (plots + .npz)
     if (iter + 1) % SAVE_FREQ == 0:
         save_checkpoint(
             SAVE_DIR, iter + 1,
-            mesh, 
+            mesh,
             soln,
-            residual,
             residual_hist,
             BOUNDARY_CONDITIONS,
-            xfoil_data,
+            blasius_file=".\\data\\blasius\\blasius_table.csv",    
+            x_eval=0.1,                               
+            y_eval=0.0025,                        
+            nu=TRANS_PROPS["mu"], # considering rho=1
         )
 
 
 # ============================================================ #
-#                        FINAL PLOTS                           #
+#                        FINAL PLOT                            #
 # ============================================================ #
 
-plot_continuity_residual(mesh, residual)
-plot_soln(mesh, soln, title="Final Solution")
-plot_pressure_distribution(mesh, soln.p, BOUNDARY_CONDITIONS, xfoil_data, c=1.0)
+plot_blasius(
+    mesh, 
+    soln, 
+    x_eval=0.1, 
+    y_eval=0.0025,
+    U_infty = BOUNDARY_CONDITIONS["velocity-inlet"]["u"],
+    nu = TRANS_PROPS["mu"], # considering rho=1
+    blasius_file=".\\data\\blasius\\blasius_table.csv"
+)

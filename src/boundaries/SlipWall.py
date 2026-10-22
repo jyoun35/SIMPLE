@@ -2,7 +2,7 @@ from .boundaries import BoundaryCondition
 from ..numerics import non_ortho_corr_flux
 
 class SlipWall(BoundaryCondition):
-    """No-penetration (u·n = 0), slip (∂u/∂n = 0) wall boundary condition."""
+    """No-penetration (U·n = 0), slip (∂U/∂n = 0) wall boundary condition."""
 
     # ---------------- Getters ---------------- #
     def get_face_velocity(self, u_cell, v_cell, n_x, n_y):
